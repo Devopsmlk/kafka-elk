@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # Kafka 3.8 with KRaft mode
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      # KRaft Configuration 
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+      
+      # Topic Settings
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      
+      # Log Settings
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_HOURS: 24
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - elk-network
+
+  # Elasticsearch 9.1.3
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.1.3
+    container_name: elasticsearch
+    environment:
+      - node.name=elasticsearch
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - elk-network
+
+  # Logstash 9.1.3
+  logstash:
+    image: docker.elastic.co/logstash/logstash:9.1.3
+    container_name: logstash
+    volumes:
+      - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+    ports:
+      - "5044:5044"
+      - "9600:9600"
+    environment:
+      - "LS_JAVA_OPTS=-Xms512m -Xmx512m"
+    depends_on:
+      - kafka
+      - elasticsearch
+    networks:
+      - elk-network
+
+  # Kibana 9.1.3
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.1.3
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - xpack.security.enabled=false
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - elk-network
+
+  # Kafka UI for management
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - elk-network
+
+  # Simple Python service for testing
+  test-service:
+    build: .
+    container_name: test-service
+    ports:
+      - "8000:8000"
+    environment:
+      - KAFKA_SERVERS=kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - elk-network
+    restart: on-failure
+
+volumes:
+  kafka_data:
+  es_data:
+
+networks:
+  elk-network:
+    driver: bridge
